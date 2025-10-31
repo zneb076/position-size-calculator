@@ -1,0 +1,49 @@
+name: Deploy Vue App to GitHub Pages
+
+# ทำงานเมื่อมีการ push ไปที่ branch 'main'
+on:
+  push:
+    branches: [main]
+
+# อนุญาตให้ workflow นี้เขียนไปยัง 'gh-pages' branch ได้
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout โค้ดล่าสุดจาก 'main'
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. ตั้งค่า Node.js (ใช้เวอร์ชัน 18 หรือ 20 ก็ได้)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 3. ติดตั้ง Dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 4. Build โปรเจกต์
+      - name: Build
+        run: npm run build
+
+      # 5. เตรียมไฟล์สำหรับ Deploy
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      # 6. อัปโหลดไฟล์ที่ build แล้ว (จากโฟลเดอร์ 'dist')
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./dist"
+
+      # 7. Deploy ไปยัง GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
