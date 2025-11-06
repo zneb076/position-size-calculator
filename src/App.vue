@@ -1,12 +1,15 @@
 <script setup>
-import { reactive, computed } from "vue";
+// 1. Import 'ref' และ 'nextTick' เพิ่ม
+import { reactive, computed, watch, ref, nextTick } from "vue";
 
 // --- ส่วนที่ 1: State สำหรับ Position Calculator ---
 const inputs = reactive({
-  portfolioBalance: 10000,
+  portfolioBalance: 1000,
   riskPercent: 2,
   stopLossPercent: 3,
-  leverage: 10,
+  leverage: 1,
+  entryPrice: null,
+  stoplossPrice: null,
 });
 
 // --- ส่วนที่ 2: State สำหรับ Scenario Simulator ---
@@ -17,14 +20,78 @@ const simulatorInputs = reactive({
   winTrades: 10,
 });
 
+// 2. (เพิ่มใหม่) สร้าง Flag เพื่อป้องกัน Infinite Loop
+const isUpdatingProgrammatically = ref(false);
+
+// 3. (อัปเดต) Watcher ตัวที่ 1:
+// ถ้ากรอก 'Entry' หรือ 'SL Price' -> ให้อัปเดต '% STOP LOSS'
+watch(
+  [() => inputs.entryPrice, () => inputs.stoplossPrice],
+  ([newEntry, newSL]) => {
+    // ถ้า Watcher อีกตัวกำลังทำงาน, ให้หยุด
+    if (isUpdatingProgrammatically.value) return;
+
+    if (newEntry && newSL && newEntry > 0 && newSL > 0) {
+      // คำนวณ % SL
+      const slPercent = (Math.abs(newEntry - newSL) / newEntry) * 100;
+
+      // "ยกธง" บอกว่าฉันกำลังจะอัปเดตค่า
+      isUpdatingProgrammatically.value = true;
+
+      inputs.stopLossPercent = parseFloat(slPercent.toFixed(2));
+
+      // "ลดธง" ลงหลังจากที่ Vue อัปเดตหน้าจอเสร็จแล้ว
+      nextTick(() => {
+        isUpdatingProgrammatically.value = false;
+      });
+    }
+  }
+);
+
+// 4. (อัปเดต) Watcher ตัวที่ 2:
+// ถ้ากรอก 'Entry' หรือ '% STOP LOSS' -> ให้อัปเดต 'SL Price'
+watch(
+  [() => inputs.entryPrice, () => inputs.stopLossPercent],
+  ([newEntry, newPercent]) => {
+    // ถ้า Watcher อีกตัวกำลังทำงาน, ให้หยุด
+    if (isUpdatingProgrammatically.value) return;
+
+    if (newEntry && newPercent && newEntry > 0 && newPercent > 0) {
+      // คำนวณส่วนต่างราคา
+      const priceDifference = (newPercent / 100) * newEntry;
+
+      // คำนวณ SL Price (เราจะสมมติว่าเป็น Long position, SL < Entry)
+      // ถ้า user จะ Short (SL > Entry) เขาต้องกรอกราคา SL เอง
+      const slPrice = newEntry - priceDifference;
+
+      // "ยกธง" บอกว่าฉันกำลังจะอัปเดตค่า
+      isUpdatingProgrammatically.value = true;
+
+      inputs.stoplossPrice = parseFloat(slPrice.toFixed(2));
+
+      // "ลดธง" ลงหลังจากที่ Vue อัปเดตหน้าจอเสร็จแล้ว
+      nextTick(() => {
+        isUpdatingProgrammatically.value = false;
+      });
+    }
+  }
+);
+
 // --- ส่วนที่ 1: ผลลัพธ์สำหรับ Position Calculator ---
+// (ส่วนนี้เหมือนเดิม 100% ไม่ต้องแก้ไข)
 const results = computed(() => {
   if (
     inputs.riskPercent <= 0 ||
     inputs.stopLossPercent <= 0 ||
     inputs.leverage <= 0
   ) {
-    return { positionSize: 0, tradesLeft: 0, riskAmount: 0 };
+    return {
+      positionSize: 0,
+      tradesLeft: 0,
+      riskAmount: 0,
+      remainingEquity: inputs.portfolioBalance,
+      recoveryLostPercent: 0,
+    };
   }
 
   const riskAmount = inputs.portfolioBalance * (inputs.riskPercent / 100);
@@ -32,15 +99,21 @@ const results = computed(() => {
   const positionSize = notionalValue / inputs.leverage;
   const totalTrades = Math.floor(100 / inputs.riskPercent);
   const tradesLeft = totalTrades - 1;
+  const remainingEquity = inputs.portfolioBalance - riskAmount;
+  const recoveryLostPercent =
+    remainingEquity > 0 ? (riskAmount / remainingEquity) * 100 : 0;
 
   return {
     positionSize: positionSize,
     tradesLeft: tradesLeft,
     riskAmount: riskAmount,
+    remainingEquity: remainingEquity,
+    recoveryLostPercent: recoveryLostPercent,
   };
 });
 
 // --- ส่วนที่ 2: ผลลัพธ์สำหรับ Scenario Simulator ---
+// (ส่วนนี้เหมือนเดิม 100% ไม่ต้องแก้ไข)
 const simulatorResults = computed(() => {
   const amountLostPerTrade = results.value.riskAmount;
   const rrr =
@@ -87,64 +160,100 @@ const simulatorResults = computed(() => {
         </p>
 
         <div class="space-y-4">
-          <div class="flex flex-col">
-            <label class="text-sm font-medium text-gray-300 mb-1"
-              >MY PORTFOLIO BALANCE *</label
-            >
-            <div class="relative">
-              <input
-                type="number"
-                v-model.number="inputs.portfolioBalance"
-                class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <span class="absolute right-3 top-3 text-gray-400 text-sm"
-                >USDT</span
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col">
+              <label class="text-sm font-medium text-gray-300 mb-1"
+                >MY PORTFOLIO BALANCE *</label
               >
+              <div class="relative">
+                <input
+                  type="number"
+                  v-model.number="inputs.portfolioBalance"
+                  class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span class="absolute right-3 top-3 text-gray-400 text-sm"
+                  >USDT</span
+                >
+              </div>
+            </div>
+            <div class="flex flex-col">
+              <label class="text-sm font-medium text-gray-300 mb-1"
+                >% RISK OF RUIN *</label
+              >
+              <div class="relative">
+                <input
+                  type="number"
+                  v-model.number="inputs.riskPercent"
+                  class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span class="absolute right-3 top-3 text-gray-400 text-sm"
+                  >%</span
+                >
+              </div>
             </div>
           </div>
-          <div class="flex flex-col">
-            <label class="text-sm font-medium text-gray-300 mb-1"
-              >% RISK OF RUIN *</label
-            >
-            <div class="relative">
-              <input
-                type="number"
-                v-model.number="inputs.riskPercent"
-                class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <span class="absolute right-3 top-3 text-gray-400 text-sm"
-                >%</span
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col">
+              <label class="text-sm font-medium text-gray-300 mb-1"
+                >ENTRY PRICE</label
               >
+              <div class="relative">
+                <input
+                  type="number"
+                  v-model.number="inputs.entryPrice"
+                  placeholder="ราคาเข้า"
+                  class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div class="flex flex-col">
+              <label class="text-sm font-medium text-gray-300 mb-1"
+                >STOPLOSS PRICE</label
+              >
+              <div class="relative">
+                <input
+                  type="number"
+                  v-model.number="inputs.stoplossPrice"
+                  placeholder="ราคา SL"
+                  class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
           </div>
-          <div class="flex flex-col">
-            <label class="text-sm font-medium text-gray-300 mb-1"
-              >% STOP LOSS *</label
-            >
-            <div class="relative">
-              <input
-                type="number"
-                v-model.number="inputs.stopLossPercent"
-                class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <span class="absolute right-3 top-3 text-gray-400 text-sm"
-                >%</span
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col">
+              <label class="text-sm font-medium text-gray-300 mb-1"
+                >% STOP LOSS *</label
               >
+              <div class="relative">
+                <input
+                  type="number"
+                  v-model.number="inputs.stopLossPercent"
+                  step="0.01"
+                  class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span class="absolute right-3 top-3 text-gray-400 text-sm"
+                  >%</span
+                >
+              </div>
             </div>
-          </div>
-          <div class="flex flex-col">
-            <label class="text-sm font-medium text-gray-300 mb-1"
-              >LEVERAGE *</label
-            >
-            <div class="relative">
-              <input
-                type="number"
-                v-model.number="inputs.leverage"
-                class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <span class="absolute right-3 top-3 text-gray-400 text-sm"
-                >X</span
+
+            <div class="flex flex-col">
+              <label class="text-sm font-medium text-gray-300 mb-1"
+                >LEVERAGE *</label
               >
+              <div class="relative">
+                <input
+                  type="number"
+                  v-model.number="inputs.leverage"
+                  class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span class="absolute right-3 top-3 text-gray-400 text-sm"
+                  >X</span
+                >
+              </div>
             </div>
           </div>
         </div>
@@ -161,21 +270,27 @@ const simulatorResults = computed(() => {
               <span class="text-base sm:text-lg text-gray-400 ml-1">USDT</span>
             </span>
           </div>
+
           <div class="bg-gray-700 p-4 rounded-md text-sm text-gray-300">
-            <ul class="list-disc list-inside space-y-2">
-              <li>
-                Position Size ของคุณคือ
-                <strong>{{ results.positionSize.toFixed(2) }} USDT</strong>
+            <ul class="space-y-2">
+              <li class="flex justify-between">
+                <span>Loss Amount (เงินที่จะเสีย):</span>
+                <strong class="text-red-400"
+                  >-{{ results.riskAmount.toFixed(2) }} USDT</strong
+                >
               </li>
-              <li>
-                คุณจะขาดทุน
-                <strong>{{ results.riskAmount.toFixed(2) }} USDT</strong> หากโดน
-                Stop Loss
+              <li class="flex justify-between">
+                <span>Remaining Equity (เงินคงเหลือ):</span>
+                <strong>{{ results.remainingEquity.toFixed(2) }} USDT</strong>
               </li>
-              <li>
-                หากแพ้ครั้งนี้ คุณจะเหลือโอกาสอีก
+              <li class="flex justify-between">
+                <span>Recovery Lost % (ต้องทำคืน):</span>
+                <strong>{{ results.recoveryLostPercent.toFixed(2) }} %</strong>
+              </li>
+              <hr class="border-gray-600 my-2" />
+              <li class="flex justify-between">
+                <span>โอกาสเทรดที่เหลือ (ถ้าแพ้):</span>
                 <strong>{{ results.tradesLeft }} ครั้ง</strong>
-                (ถ้าเสี่ยงเท่าเดิม)
               </li>
             </ul>
           </div>
@@ -222,7 +337,7 @@ const simulatorResults = computed(() => {
             <div class="relative">
               <input
                 type="number"
-                v-model.number="simulatorInputs.totalTrades"
+                v...model.number="simulatorInputs.totalTrades"
                 class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
