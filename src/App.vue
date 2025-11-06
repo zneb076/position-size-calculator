@@ -163,7 +163,7 @@ const simulatorResults = computed(() => {
           <div class="grid grid-cols-2 gap-4">
             <div class="flex flex-col">
               <label class="text-sm font-medium text-gray-300 mb-1"
-                >MY PORTFOLIO BALANCE *</label
+                >MY EQUITY *</label
               >
               <div class="relative">
                 <input
@@ -178,7 +178,7 @@ const simulatorResults = computed(() => {
             </div>
             <div class="flex flex-col">
               <label class="text-sm font-medium text-gray-300 mb-1"
-                >% RISK OF RUIN *</label
+                >% RISK PER TRADE *</label
               >
               <div class="relative">
                 <input
