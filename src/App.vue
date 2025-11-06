@@ -337,7 +337,7 @@ const simulatorResults = computed(() => {
             <div class="relative">
               <input
                 type="number"
-                v...model.number="simulatorInputs.totalTrades"
+                v-model.number="simulatorInputs.totalTrades"
                 class="w-full bg-gray-700 p-3 rounded-md text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
